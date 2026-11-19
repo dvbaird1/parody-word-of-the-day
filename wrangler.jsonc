@@ -5,6 +5,11 @@
   "compatibility_date": "2026-04-01",
   "workers_dev": false,
   "preview_urls": false,
+  "vars": {
+    "ACCESS_ISSUER": "https://db3it.cloudflareaccess.com",
+    "ACCESS_AUDIENCE": "bbbcc921f3596d64f3ad41415055491de81ad28f53dbd214040e885c279a9a1e",
+    "ADMIN_EMAILS": "dbaird@db3it.com"
+  },
   "assets": {
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api", "/api/*"]

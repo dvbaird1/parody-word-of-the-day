@@ -12,6 +12,6 @@
   "d1_databases": [{
     "binding": "DB",
     "database_name": "parody-word-of-the-day",
-    "database_id": "00000000-0000-0000-0000-000000000000"
+    "database_id": "84c3b3e5-d575-44b3-84c4-aacfcf2e3b3e"
   }]
 }

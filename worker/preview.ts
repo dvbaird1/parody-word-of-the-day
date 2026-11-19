@@ -10,7 +10,7 @@ export const previewProvider: EmailProvider = {
   preview(word, subject = `Word of the Day · ${word.term}`) {
     subject = subject.replace(/[\r\n]+/g, ' ');
     const details = [word.part_of_speech, word.pronunciation].filter(Boolean).join(' · ');
-    const footer = 'Unsubscribe link placeholder. A public unsubscribe endpoint is required before live email.';
+    const footer = 'A personal unsubscribe link will appear in the delivered email.';
     return {
       subject,
       text: ['PARODY WORD OF THE DAY', word.term, details, `Real meaning: ${word.real_definition}`, `Deliberately wrong: “${word.parody_sentence}”`, footer].filter(Boolean).join('\n\n'),

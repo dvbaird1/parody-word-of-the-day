@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
+import { randomBytes } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,7 +20,9 @@ const word = (term, real_definition = 'Showing great attention to detail.') => (
 const recipient = email => ({email, consent_source: 'Test opt-in form', consented_at: '2025-01-01'});
 const csv = (kind, contents) => ({format: 'csv', content: `${kind}\n${contents}`});
 const json = values => ({format: 'json', content: JSON.stringify(values)});
-let temp, local, production, productionWorker, db;
+const unsubscribeOrigin = 'https://unsubscribe.example.test';
+const unsubscribeKey = randomBytes(32).toString('hex');
+let temp, local, production, productionWorker, db, createUnsubscribeUrl;
 
 async function request(runtime, path, method = 'GET', body, headers = {}) {
   const response = await runtime.dispatchFetch(origin + '/api' + path, {
@@ -37,10 +40,10 @@ async function expect(path, status, method = 'GET', body, headers) {
 
 before(async () => {
   temp = await mkdtemp(join(tmpdir(), 'parody-phase1-'));
-  async function bundle(name, mock) {
+  async function bundle(name, mock, entry = 'worker/index.ts') {
     const scriptPath = join(temp, name + '.mjs');
     await build({
-      entryPoints: ['worker/index.ts'], outfile: scriptPath, bundle: true,
+      entryPoints: [entry], outfile: scriptPath, bundle: true,
       platform: 'node', format: 'esm', target: 'es2022',
       define: {__LOCAL_DEV_BUILD__: String(mock)},
     });
@@ -48,7 +51,13 @@ before(async () => {
   }
   const common = {rootPath: temp, modulesRoot: temp, modules: true, compatibilityDate: '2026-04-01', bindings};
   const productionPath = await bundle('production', false);
-  local = new Miniflare(convertV4MiniflareOptions({cf: false, ...common, scriptPath: await bundle('local', true), d1Databases: {DB: 'phase1-test'}}));
+  local = new Miniflare(convertV4MiniflareOptions({cf: false, workers: [
+    {...common, name: 'admin', scriptPath: await bundle('local', true), d1Databases: {DB: 'phase1-test'}},
+    {...common, name: 'unsubscribe', routes: ['unsubscribe.example.test/*'], bindings: {UNSUBSCRIBE_SIGNING_KEY: unsubscribeKey},
+      scriptPath: await bundle('unsubscribe', false, 'worker/unsubscribe/index.ts'), d1Databases: {DB: 'phase1-test'}},
+  ]}));
+  const tokenPath = await bundle('unsubscribe-token', false, 'worker/unsubscribe/token.ts');
+  ({createUnsubscribeUrl} = await import(pathToFileURL(tokenPath).href));
   production = new Miniflare(convertV4MiniflareOptions({cf: false, ...common, scriptPath: productionPath}));
   productionWorker = (await import(pathToFileURL(productionPath).href)).default;
   db = await local.getD1Database('DB');
@@ -177,7 +186,7 @@ test('HTML preview escapes markup and plain text preserves the actual word and d
   assert.doesNotMatch(preview.html, /<img|<script/);
   assert.match(preview.text, /Ambiguous/);
   assert.ok(preview.text.includes(value.real_definition));
-  assert.ok(preview.text.includes('Unsubscribe link placeholder'));
+  assert.ok(preview.text.includes('A personal unsubscribe link will appear in the delivered email.'));
   assert.equal((await expect('/history', 200)).total, 0);
 });
 
@@ -247,4 +256,51 @@ test('bulk approval covers all pages, preserves non-drafts, and is safe to retry
   assert.equal(after.sent, before.sent);
   assert.deepEqual(await expect('/words/approve-all', 200, 'POST'), {approved: 0});
   assert.equal(await db.prepare("SELECT COUNT(*) AS count FROM audit_events WHERE action='word.approve-all'").first('count'), 1);
+});
+
+test('a public unsubscribe link requires confirmation and stops future delivery eligibility', async () => {
+  const person = await expect('/recipients', 201, 'POST', recipient('unsubscribe@example.test'));
+  const another = await expect('/recipients', 201, 'POST', recipient('keep-subscribed@example.test'));
+  const before = await expect('/dashboard', 200);
+  const link = await createUnsubscribeUrl(unsubscribeOrigin, person.id, unsubscribeKey);
+
+  const landing = await local.dispatchFetch(link.href);
+  assert.equal(landing.status, 200);
+  assert.equal(landing.headers.get('Cache-Control'), 'no-store');
+  assert.equal(landing.headers.get('Referrer-Policy'), 'strict-origin');
+  const html = await landing.text();
+  assert.match(html, /<form method="post" action="\/unsubscribe\?token=/);
+  assert.doesNotMatch(html, /unsubscribe@example\.test/);
+  assert.equal((await expect('/dashboard', 200)).activeRecipients, before.activeRecipients);
+  assert.equal((await local.dispatchFetch(unsubscribeOrigin + '/api/recipients')).status, 404);
+  assert.equal((await local.dispatchFetch(link.href, {method: 'POST', headers: {Origin: 'https://other.example.test'}})).status, 403);
+
+  const forged = await createUnsubscribeUrl(unsubscribeOrigin, person.id, randomBytes(32).toString('hex'));
+  assert.equal((await local.dispatchFetch(forged.href, {method: 'POST', headers: {Origin: unsubscribeOrigin}})).status, 400);
+  const expired = new URL(link);
+  expired.searchParams.set('token', await new SignJWT({})
+    .setProtectedHeader({alg: 'HS256', typ: 'JWT'})
+    .setIssuer('word-of-the-day/unsubscribe').setAudience('word-of-the-day-recipients')
+    .setSubject(person.id).setIssuedAt(1).setExpirationTime(2)
+    .sign(Buffer.from(unsubscribeKey, 'hex')));
+  assert.equal((await local.dispatchFetch(expired.href)).status, 400);
+
+  const submit = () => local.dispatchFetch(link.href, {method: 'POST', headers: {Origin: unsubscribeOrigin}, redirect: 'manual'});
+  const response = await submit();
+  assert.equal(response.status, 303);
+  assert.equal(response.headers.get('Location'), '/unsubscribed');
+  const success = await local.dispatchFetch(new URL(response.headers.get('Location'), link).href);
+  assert.match(await success.text(), /This email subscription is no longer active/);
+
+  const stored = () => db.prepare('SELECT status, unsubscribed_at FROM recipients WHERE id = ?').bind(person.id).first();
+  const updated = await stored();
+  assert.equal(updated.status, 'unsubscribed');
+  assert.ok(updated.unsubscribed_at);
+  assert.equal((await expect('/dashboard', 200)).activeRecipients, before.activeRecipients - 1);
+  assert.equal(await db.prepare('SELECT status FROM recipients WHERE id = ?').bind(another.id).first('status'), 'active');
+  await expect('/recipients/' + person.id, 409, 'PATCH', {status: 'active'});
+  assert.equal((await submit()).status, 303);
+  assert.deepEqual(await stored(), updated);
+  assert.equal(await db.prepare("SELECT COUNT(*) AS count FROM audit_events WHERE action='recipient.public-unsubscribe' AND subject_id=?")
+    .bind(person.id).first('count'), 1);
 });

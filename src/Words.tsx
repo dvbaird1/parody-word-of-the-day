@@ -54,6 +54,18 @@ export function Words({approvals = false}: {approvals?: boolean}) {
     }, ({approve: 'Word approved.', reject: 'Word rejected.', 'restore-draft': 'Word restored to drafts.', delete: 'Draft deleted.', priority: 'Priority updated.'} as Record<string, string>)[name]);
   }
 
+  function approveAll() {
+    if (!window.confirm('Approve every draft and add it to the ready queue? This includes drafts on other pages and outside the current search.')) return;
+    setSaved('');
+    void run(async () => {
+      const {approved} = await send<{approved: number}>('/words/approve-all', 'POST');
+      setPage(1);
+      setSearch('');
+      result.refresh();
+      setSaved(approved === 0 ? 'No drafts to approve.' : `Approved ${approved} ${approved === 1 ? 'draft' : 'drafts'}.`);
+    });
+  }
+
   function buttons(word: Word) {
     return <div className="actions">
       {word.status === 'draft' && <>
@@ -70,6 +82,7 @@ export function Words({approvals = false}: {approvals?: boolean}) {
   return <>
     <div className="screen-head">
       <div><h1>{approvals ? 'Approvals' : 'Word library'}</h1><p>{approvals ? 'Review the meaning and the misuse before a word joins the queue.' : 'Manage drafts and decide which approved words go first.'}</p></div>
+      {approvals && <button className="primary" disabled={busy || (!search && !result.data?.total)} onClick={approveAll}>Approve all drafts</button>}
       {!approvals && <div className="actions"><button onClick={() => setImporting(true)}>Import words</button><button className="primary" onClick={() => setEditor('new')}>＋ New draft</button></div>}
     </div>
     <Notice notice={saved ? {message: saved} : notice}/>

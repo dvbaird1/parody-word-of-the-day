@@ -103,6 +103,13 @@ async function handle(request: Request, env: Env) {
     return json(await importRecords(db, kind, await readBody(request, 256 * 1024), importMatch[2] === 'commit', actor));
   }
   if (method === 'GET' && pathname === '/api/dashboard') return json(await dashboard(db));
+  if (method === 'POST' && pathname === '/api/words/approve-all') {
+    const [result] = await db.batch([
+      db.prepare("UPDATE words SET status='approved', approved_at=?, updated_at=? WHERE status='draft'").bind(now, now),
+      auditChange(db, actor, 'word.approve-all', null, now),
+    ]);
+    return json({approved: result.meta.changes});
+  }
   if (pathname === '/api/words') {
     if (method === 'GET') return json(await getPage<Word>(db, 'words', searchParams));
     if (method === 'POST') {

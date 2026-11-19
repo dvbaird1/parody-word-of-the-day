@@ -16,5 +16,5 @@ export const audit = (db: D1Database, actor: string, action: string, id: string 
   db.prepare('INSERT INTO audit_events VALUES (?,?,?,?,?)').bind(crypto.randomUUID(), actor, action, id, now);
 
 // Must immediately follow a conditional write in the same atomic D1 batch.
-export const auditChange = (db: D1Database, actor: string, action: string, id: string, now: string) =>
-  db.prepare('INSERT INTO audit_events SELECT ?,?,?,?,? WHERE changes() = 1').bind(crypto.randomUUID(), actor, action, id, now);
+export const auditChange = (db: D1Database, actor: string, action: string, id: string | null, now: string) =>
+  db.prepare('INSERT INTO audit_events SELECT ?,?,?,?,? WHERE changes() > 0').bind(crypto.randomUUID(), actor, action, id, now);

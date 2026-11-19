@@ -185,6 +185,7 @@ test('production ignores the mock binding and spoofed identity on every admin ro
   const id = '00000000-0000-4000-8000-000000000001';
   const cases = [
     ['/dashboard'], ['/words'], ['/words', 'POST'], ['/words/' + id], ['/words/' + id, 'PATCH'], ['/words/' + id, 'DELETE'],
+    ['/words/approve-all', 'POST'],
     ...['approve', 'reject', 'restore-draft'].map(action => ['/words/' + id + '/' + action, 'POST']),
     ...['preview', 'commit'].map(action => ['/words/import/' + action, 'POST']),
     ['/recipients'], ['/recipients', 'POST'], ['/recipients/' + id, 'PATCH'],
@@ -228,4 +229,22 @@ test('mutations reject cross-origin, missing-origin, non-JSON and oversize reque
   assert.equal(missing.status, 403);
   await expect('/words', 415, 'POST', word('Type test'), {'Content-Type': 'text/plain'});
   await expect('/words', 413, 'POST', word('Limit test', 'x'.repeat(27000)));
+});
+
+test('bulk approval covers all pages, preserves non-drafts, and is safe to retry', async () => {
+  const drafts = Array.from({length: 25}, (_, index) => word('Bulk draft ' + index));
+  await expect('/words/import/commit', 200, 'POST', {format: 'json', content: JSON.stringify(drafts)});
+  const rejected = await expect('/words', 201, 'POST', word('Bulk excluded'));
+  await expect('/words/' + rejected.id + '/reject', 200, 'POST');
+  const before = await expect('/dashboard', 200);
+  assert.ok(before.draft > 20);
+  await expect('/words/approve-all', 403, 'POST', undefined, {Origin: 'https://elsewhere.example'});
+  assert.deepEqual(await expect('/words/approve-all?search=unmatched&page=2', 200, 'POST'), {approved: before.draft});
+  const after = await expect('/dashboard', 200);
+  assert.equal(after.draft, 0);
+  assert.equal(after.approved, before.approved + before.draft);
+  assert.equal(after.rejected, before.rejected);
+  assert.equal(after.sent, before.sent);
+  assert.deepEqual(await expect('/words/approve-all', 200, 'POST'), {approved: 0});
+  assert.equal(await db.prepare("SELECT COUNT(*) AS count FROM audit_events WHERE action='word.approve-all'").first('count'), 1);
 });

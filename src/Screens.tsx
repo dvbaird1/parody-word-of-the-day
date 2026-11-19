@@ -1,3 +1,4 @@
+import { emailWithPreviewTheme, type Theme } from '../shared/email-theme';
 import { useState, type FormEvent } from 'react';
 import type { Dashboard, EmailPreview, Page, SendRun, Settings as AppSettings, Word } from '../shared/model';
 import { send, useAction, useResource } from './api';
@@ -33,7 +34,7 @@ export function Overview() {
   </>;
 }
 
-export function Preview() {
+export function Preview({theme}: {theme: Theme}) {
   const [word, setWord] = useState<Word>();
   const [query, setQuery] = useState('');
   const [subject, setSubject] = useState('');
@@ -72,7 +73,7 @@ export function Preview() {
           <div className="panel-head"><div><span className="hint">Subject</span><h2>{preview.data.subject}</h2></div>
             <div className="actions"><button type="button" aria-pressed={mode === 'html'} onClick={() => setMode('html')}>HTML</button><button type="button" aria-pressed={mode === 'text'} onClick={() => setMode('text')}>Plain text</button></div>
           </div>
-          {mode === 'html' ? <iframe title="HTML email preview" sandbox="" srcDoc={preview.data.html}/> : <pre>{preview.data.text}</pre>}
+          {mode === 'html' ? <iframe title="HTML email preview" sandbox="" srcDoc={emailWithPreviewTheme(preview.data.html, theme)}/> : <pre>{preview.data.text}</pre>}
         </> : !request && <Empty title="No email rendered">Choose a word and render a preview.</Empty>}
       </section>
     </div>

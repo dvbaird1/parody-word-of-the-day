@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { History, Overview, Preview, Settings } from './Screens';
 import { Words } from './Words';
 import { Recipients } from './Recipients';
+import type { Theme } from '../shared/email-theme';
 import './style.css';
 
 const sections = {
@@ -21,8 +22,46 @@ function currentSection(): Section {
   return Object.hasOwn(sections, key) ? key as Section : 'overview';
 }
 
+const themeKey = 'word-of-the-day.theme';
+const systemTheme = matchMedia('(prefers-color-scheme: dark)');
+
+function savedTheme(): Theme | null {
+  try {
+    const saved = localStorage.getItem(themeKey);
+    return saved === 'dark' || saved === 'light' ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
+function useTheme() {
+  const [preference, setPreference] = useState(savedTheme);
+  const [systemDark, setSystemDark] = useState(systemTheme.matches);
+  const theme = preference ?? (systemDark ? 'dark' : 'light');
+  useLayoutEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
+  useEffect(() => {
+    if (preference !== null) return;
+    const track = (event: MediaQueryListEvent) => setSystemDark(event.matches);
+    systemTheme.addEventListener('change', track);
+    setSystemDark(systemTheme.matches);
+    return () => systemTheme.removeEventListener('change', track);
+  }, [preference]);
+
+  function toggleTheme() {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    setPreference(next);
+    try {
+      localStorage.setItem(themeKey, next);
+    } catch {
+      // The switch still works for the current visit when storage is blocked.
+    }
+  }
+  return {theme, toggleTheme};
+}
+
 function App() {
   const [section, setSection] = useState(currentSection);
+  const {theme, toggleTheme} = useTheme();
   useEffect(() => {
     const navigate = () => { setSection(currentSection()); window.scrollTo(0, 0); };
     window.addEventListener('hashchange', navigate);
@@ -41,8 +80,16 @@ function App() {
       </a>)}</nav>
     </aside>
     <div className="workspace">
-      <header className="topbar"><span>Admin dashboard</span><span className="off"><span aria-hidden="true"/>Sending OFF — Phase 1</span></header>
-      <main id="main-content" tabIndex={-1}><Component key={section}/></main>
+      <header className="topbar">
+        <span>Admin dashboard</span>
+        <div className="topbar-actions">
+          <span className="off"><span aria-hidden="true"/>Sending OFF — Phase 1</span>
+          <button type="button" className="theme-switch" role="switch" aria-checked={theme === 'dark'} onClick={toggleTheme}>
+            <span className="theme-track" aria-hidden="true"/> Dark mode
+          </button>
+        </div>
+      </header>
+      <main id="main-content" tabIndex={-1}><Component key={section} theme={theme}/></main>
     </div>
   </div>;
 }

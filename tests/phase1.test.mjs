@@ -184,6 +184,10 @@ test('HTML preview escapes markup and plain text preserves the actual word and d
   assert.match(preview.html, /&lt;img/);
   assert.match(preview.html, /&lt;script&gt;fake subject/);
   assert.doesNotMatch(preview.html, /<img|<script/);
+  assert.match(preview.html, /name="color-scheme" content="light dark"/);
+  assert.match(preview.html, /@media \(prefers-color-scheme: dark\)/);
+  assert.ok(preview.html.includes('[data-ogsc] .email-card'));
+  assert.match(preview.html, /class="email-card"[^>]*bgcolor="#fffdf7"/);
   assert.match(preview.text, /Ambiguous/);
   assert.ok(preview.text.includes(value.real_definition));
   assert.ok(preview.text.includes('A personal unsubscribe link will appear in the delivered email.'));

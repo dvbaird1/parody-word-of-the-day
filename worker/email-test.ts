@@ -1,28 +1,15 @@
 import { z } from 'zod';
 import { normalizeEmail, type EmailTest, type Word } from '../shared/model';
-import { graphAccessToken, submitGraphTest, type GraphConfig } from './graph';
+import { graphAccessToken, graphSender, submitGraphEmail, type GraphBindings } from './graph';
 import { HttpError } from './http';
 import { previewProvider } from './preview';
 
-export type EmailTestBindings = {
-  GRAPH_TENANT_ID?: string;
-  GRAPH_CLIENT_ID?: string;
-  GRAPH_CLIENT_SECRET?: string;
-  GRAPH_MAILBOX?: string;
-  GRAPH_TEST_RECIPIENT?: string;
-  UNSUBSCRIBE_LINKS?: { createLink(id: string): Promise<string> };
-};
+export type EmailTestBindings = GraphBindings & {GRAPH_TEST_RECIPIENT?: string};
 
-const configSchema = z.object({
-  tenantId: z.uuid(), clientId: z.uuid(), clientSecret: z.string().min(1),
-  mailbox: z.email(), recipient: z.email(),
-});
-
-function graphConfig(env: EmailTestBindings): GraphConfig | undefined {
-  return configSchema.safeParse({
-    tenantId: env.GRAPH_TENANT_ID, clientId: env.GRAPH_CLIENT_ID, clientSecret: env.GRAPH_CLIENT_SECRET,
-    mailbox: env.GRAPH_MAILBOX, recipient: env.GRAPH_TEST_RECIPIENT && normalizeEmail(env.GRAPH_TEST_RECIPIENT),
-  }).data;
+function graphConfig(env: EmailTestBindings) {
+  const sender = graphSender(env);
+  const recipient = z.email().safeParse(normalizeEmail(env.GRAPH_TEST_RECIPIENT ?? '')).data;
+  return sender && recipient ? {...sender, recipient} : undefined;
 }
 
 export async function emailTestStatus(db: D1Database, env: EmailTestBindings): Promise<EmailTest> {
@@ -76,7 +63,7 @@ export async function sendEmailTest(db: D1Database, env: EmailTestBindings, word
     throw new HttpError(502, 'Could not prepare the email test. Check the Graph credential and unsubscribe signer before retrying.');
   }
 
-  const status = await submitGraphTest(config, accessToken, email);
+  const status = await submitGraphEmail(config, accessToken, email);
   await finish(status);
   return {recipient: config.recipient, configured: true, status};
 }

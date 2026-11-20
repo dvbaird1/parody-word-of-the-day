@@ -1,12 +1,32 @@
+import { z } from 'zod';
 import type { EmailPreview } from '../shared/model';
 
-export type GraphConfig = {
+export type GraphSenderConfig = {
   tenantId: string;
   clientId: string;
   clientSecret: string;
   mailbox: string;
-  recipient: string;
 };
+
+export type GraphConfig = GraphSenderConfig & {recipient: string};
+export type GraphBindings = {
+  GRAPH_TENANT_ID?: string;
+  GRAPH_CLIENT_ID?: string;
+  GRAPH_CLIENT_SECRET?: string;
+  GRAPH_MAILBOX?: string;
+  UNSUBSCRIBE_LINKS?: {createLink(id: string): Promise<string>};
+};
+
+const senderSchema = z.object({
+  tenantId: z.uuid(), clientId: z.uuid(), clientSecret: z.string().min(1), mailbox: z.email(),
+});
+
+export function graphSender(env: GraphBindings): GraphSenderConfig | undefined {
+  return senderSchema.safeParse({
+    tenantId: env.GRAPH_TENANT_ID, clientId: env.GRAPH_CLIENT_ID,
+    clientSecret: env.GRAPH_CLIENT_SECRET, mailbox: env.GRAPH_MAILBOX,
+  }).data;
+}
 
 const base64 = (text: string) => btoa(String.fromCharCode(...new TextEncoder().encode(text)));
 
@@ -24,7 +44,7 @@ function messageSource(config: GraphConfig, email: EmailPreview) {
   ].join('\r\n');
 }
 
-export async function graphAccessToken(config: GraphConfig): Promise<string> {
+export async function graphAccessToken(config: GraphSenderConfig): Promise<string> {
   const response = await fetch(`https://login.microsoftonline.com/${config.tenantId}/oauth2/v2.0/token`, {
     method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(10_000),
     body: new URLSearchParams({
@@ -41,7 +61,7 @@ export async function graphAccessToken(config: GraphConfig): Promise<string> {
   return result.access_token;
 }
 
-export async function submitGraphTest(config: GraphConfig, accessToken: string, email: EmailPreview) {
+export async function submitGraphEmail(config: GraphConfig, accessToken: string, email: EmailPreview) {
   const body = base64(messageSource(config, email));
   try {
     const response = await fetch(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(config.mailbox)}/sendMail`, {

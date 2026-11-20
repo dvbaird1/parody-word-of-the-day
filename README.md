@@ -1,6 +1,6 @@
 # Parody Word of the Day
 
-A private admin dashboard for a vocabulary email that pairs a real definition with a deliberately wrong example sentence. Phase 1 covers manual authoring, approval, queue planning, recipient consent, and preview. Scheduled email delivery and paid AI are off. A separately configured manual send can test Microsoft Graph with a single approved inbox.
+A private admin dashboard for a vocabulary email that pairs a real definition with a deliberately wrong example sentence. Phase 1 covers manual authoring, approval, queue planning, recipient consent, and preview. Scheduled email delivery starts paused. Paid AI is off. A separately configured manual send can test Microsoft Graph with a single approved inbox.
 
 ## Run locally
 
@@ -44,4 +44,4 @@ Perform these steps only after deployment approval.
 3. Configure Worker-side `ACCESS_ISSUER` (e.g. `https://YOUR-TEAM.cloudflareaccess.com`, no trailing slash), `ACCESS_AUDIENCE` (the Access application AUD), and `ADMIN_EMAILS` (comma-separated exact emails). Configure these in Worker settings or with `wrangler secret put`; the SPA needs none of them.
 4. Run `npm run build` and `npm run deploy` and attach the Access-protected custom domain. Verify anonymous navigation reaches Access, direct API requests with spoofed identity fail, signed nonadmin requests fail, and allowlisted admins can make same-origin reads and writes. Verify equivalent protection on any future staging or preview host. This live verification requires the actual Access configuration.
 
-See [architecture](docs/ARCHITECTURE.md), the [public unsubscribe deployment guide](docs/UNSUBSCRIBE.md), the [Exchange mailbox scope setup](docs/PHASE2_GRAPH_SETUP.md), and the [manual Graph test guide](docs/GRAPH_TEST_SEND.md).
+See [architecture](docs/ARCHITECTURE.md), the [public unsubscribe deployment guide](docs/UNSUBSCRIBE.md), the [Exchange mailbox scope setup](docs/PHASE2_GRAPH_SETUP.md), the [manual Graph test guide](docs/GRAPH_TEST_SEND.md), and the [scheduled delivery guide](docs/SCHEDULED_DELIVERY.md).

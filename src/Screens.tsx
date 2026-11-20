@@ -120,8 +120,13 @@ export function History() {
     <div className="screen-head"><div><h1>Send history</h1><p>Recorded delivery runs by Eastern schedule date.</p></div></div>
     <Result {...result} retry={result.refresh}/>
     {result.data && <div className="panel table-wrap">{result.data.rows.length ? <>
-      <table><thead><tr><th>Schedule date</th><th>Word</th><th>Run status</th><th>Completed</th></tr></thead>
-        <tbody>{result.data.rows.map(run => <tr key={run.id}><td>{run.schedule_date_et}</td><td>{run.term}</td><td><Badge status={run.status}/></td><td>{formatDate(run.completed_at)}</td></tr>)}</tbody>
+      <table><thead><tr><th>Schedule date</th><th>Word</th><th>Run status</th><th>Results</th><th>Completed</th></tr></thead>
+        <tbody>{result.data.rows.map(run => <tr key={run.id}><td>{run.schedule_date_et}</td><td>{run.term}</td><td><Badge status={run.status}/></td><td>
+          {run.submitted} accepted by Graph
+          {!!run.failed && <small>{run.failed} failed</small>}
+          {!!run.unknown && <small>{run.unknown} uncertain</small>}
+          {!!run.suppressed && <small>{run.suppressed} suppressed</small>}
+        </td><td>{formatDate(run.completed_at)}</td></tr>)}</tbody>
       </table><Pager result={result.data} setPage={setPage}/>
     </> : <Empty title="No send runs">No scheduled emails have been submitted.</Empty>}</div>}
   </>;
@@ -134,7 +139,7 @@ function SettingsForm({settings}: {settings: AppSettings}) {
     const values = Object.fromEntries(new FormData(event.currentTarget));
     void run(async () => { await send('/settings', 'PATCH', values); }, 'Preferences saved.');
   }
-  return <form className="panel padded" onSubmit={submit}><h2>Schedule preferences</h2><p>These preferences are stored for future scheduling.</p>
+  return <form className="panel padded" onSubmit={submit}><h2>Schedule preferences</h2>
     <fieldset disabled={busy}><label>Timezone<input name="timezone" defaultValue={settings.timezone} placeholder="America/New_York" required maxLength={100}/></label>
       <label>Preferred time<input name="send_time" type="time" defaultValue={settings.send_time} required/></label>
       <button className="primary">{busy ? 'Saving…' : 'Save preferences'}</button>
@@ -142,15 +147,33 @@ function SettingsForm({settings}: {settings: AppSettings}) {
   </form>;
 }
 
-export function Settings() {
+export function Settings({onScheduleChange}: {onScheduleChange: () => void}) {
   const result = useResource<AppSettings>('/settings');
+  const action = useAction();
+  function toggleSchedule() {
+    const enabled = !result.data?.sending_enabled;
+    if (enabled && !window.confirm('Enable daily delivery to active, opted-in recipients at the saved time?')) return;
+    void action.run(async () => {
+      await send('/settings/schedule', 'PATCH', {enabled});
+      result.refresh();
+      onScheduleChange();
+    }, enabled ? 'Scheduled sending enabled.' : 'Scheduled sending paused.');
+  }
   return <>
-    <div className="screen-head"><div><h1>Settings</h1><p>Configure preferences for a future launch.</p></div></div>
+    <div className="screen-head"><div><h1>Settings</h1><p>Manage the daily Word of the Day schedule.</p></div></div>
     <Result {...result} retry={result.refresh}/>
     {result.data && <div className="overview-grid">
       <SettingsForm settings={result.data}/>
       <section className="panel padded"><h2>Email delivery</h2>
-        <dl className="details"><dt>Scheduled sending</dt><dd>Off</dd><dt>Sender address</dt><dd>Not configured</dd><dt>Automated scheduling</dt><dd>Off</dd></dl>
+        <dl className="details">
+          <dt>Scheduled sending</dt><dd>{result.data.sending_enabled ? 'On' : 'Paused'}</dd>
+          <dt>Graph sender</dt><dd>{result.data.sender_configured ? 'Configured' : 'Not configured'}</dd>
+        </dl>
+        <button type="button" className="primary" onClick={toggleSchedule}
+          disabled={action.busy || (!result.data.sending_enabled && !result.data.sender_configured)}>
+          {result.data.sending_enabled ? 'Pause scheduled sending' : 'Enable scheduled sending'}
+        </button>
+        <Notice notice={action.notice}/>
       </section>
     </div>}
   </>;

@@ -57,8 +57,8 @@ export type ImportReport = {
   total: number; valid: number; invalid: number; duplicates: number;
   rows: { row: number; label: string; status: 'valid' | 'invalid' | 'duplicate'; message?: string }[];
 };
-export type Settings = z.output<typeof settingsInput> & {sending_enabled: 0; sender_configured: 0};
-export type SendRun = {id: string; schedule_date_et: string; term: string; status: string; created_at: string; completed_at: string | null};
+export type Settings = z.output<typeof settingsInput> & {sending_enabled: 0 | 1; sender_configured: 0 | 1};
+export type SendRun = {id: string; schedule_date_et: string; term: string; status: string; created_at: string; completed_at: string | null; submitted: number; failed: number; unknown: number; suppressed: number};
 export type EmailPreview = {subject: string; html: string; text: string};
 
 export type EmailTest = {

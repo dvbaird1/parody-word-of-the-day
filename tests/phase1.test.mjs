@@ -52,7 +52,7 @@ async function mockGraph(request) {
   graphSubmissions.push(Buffer.from(await request.text(), 'base64').toString('utf8'));
   return new Response(null, {status: graphStatus});
 }
-let temp, local, production, productionWorker, db, createUnsubscribeUrl;
+let temp, local, production, productionWorker, db, createUnsubscribeUrl, scheduleDue;
 
 async function request(runtime, path, method = 'GET', body, headers = {}) {
   const response = await runtime.dispatchFetch(origin + '/api' + path, {
@@ -73,7 +73,7 @@ before(async () => {
   async function bundle(name, mock, entry = 'worker/index.ts') {
     const scriptPath = join(temp, name + '.mjs');
     await build({
-      entryPoints: [entry], outfile: scriptPath, bundle: true,
+      ...(typeof entry === 'string' ? {entryPoints: [entry]} : {stdin: entry}), outfile: scriptPath, bundle: true,
       platform: 'node', format: 'esm', target: 'es2022', external: ['cloudflare:workers'],
       define: {__LOCAL_DEV_BUILD__: String(mock)},
     });
@@ -81,19 +81,31 @@ before(async () => {
   }
   const common = {rootPath: temp, modulesRoot: temp, modules: true, compatibilityDate: '2026-04-01', bindings};
   const productionPath = await bundle('production', false);
+  const localPath = await bundle('local', true, {
+    resolveDir: process.cwd(),
+    contents: `import worker from './worker/index.ts';
+      export default {...worker, async fetch(request, env) {
+        const url = new URL(request.url);
+        if (url.pathname !== '/__test/scheduled') return worker.fetch(request, env);
+        await worker.scheduled({scheduledTime: Number(url.searchParams.get('time'))}, env);
+        return Response.json({outcome: 'ok'});
+      }};`,
+  });
   local = new Miniflare(convertV4MiniflareOptions({cf: false, workers: [
-    {...common, name: 'admin', scriptPath: await bundle('local', true), d1Databases: {DB: 'phase1-test'},
-      bindings: {...bindings, ...graphBindings}, outboundService: mockGraph,
+    {...common, name: 'admin', scriptPath: localPath, d1Databases: {DB: 'phase1-test'},
+      bindings: {...bindings, ...graphBindings}, outboundService: mockGraph, cronTriggers: ['* * * * *'],
       serviceBindings: {UNSUBSCRIBE_LINKS: {name: 'unsubscribe', entrypoint: 'UnsubscribeLinks'}}},
     {...common, name: 'unsubscribe', routes: ['unsubscribe.example.test/*'], bindings: {UNSUBSCRIBE_SIGNING_KEY: unsubscribeKey, UNSUBSCRIBE_ORIGIN: unsubscribeOrigin},
       scriptPath: await bundle('unsubscribe', false, 'worker/unsubscribe/index.ts'), d1Databases: {DB: 'phase1-test'}},
   ]}));
+  const schedulePath = await bundle('schedule', false, 'worker/schedule.ts');
+  ({scheduleDue} = await import(pathToFileURL(schedulePath).href));
   const tokenPath = await bundle('unsubscribe-token', false, 'worker/unsubscribe/token.ts');
   ({createUnsubscribeUrl} = await import(pathToFileURL(tokenPath).href));
   production = new Miniflare(convertV4MiniflareOptions({cf: false, ...common, scriptPath: productionPath}));
   productionWorker = (await import(pathToFileURL(productionPath).href)).default;
   db = await local.getD1Database('DB');
-  for (const name of ['0001_initial.sql', '0002_email_test_sends.sql']) {
+  for (const name of ['0001_initial.sql', '0002_email_test_sends.sql', '0003_scheduled_delivery.sql']) {
     const migration = await readFile('migrations/' + name, 'utf8');
     await db.batch(migration.split(';').map(statement => statement.trim()).filter(Boolean).map(statement => db.prepare(statement)));
   }
@@ -109,7 +121,7 @@ test('empty migration has accurate inventory and history, and scheduling is off'
     total: 0, draft: 0, approved: 0, rejected: 0, sent: 0, activeRecipients: 0, next: null, target: 365,
   });
   assert.equal((await expect('/history', 200)).total, 0);
-  assert.deepEqual(await expect('/settings', 200), {timezone: 'America/New_York', send_time: '08:00', sending_enabled: 0, sender_configured: 0});
+  assert.deepEqual(await expect('/settings', 200), {timezone: 'America/New_York', send_time: '08:00', sending_enabled: 0, sender_configured: 1});
   await expect('/settings', 400, 'PATCH', {timezone: 'America/New_York', send_time: '08:00', sending_enabled: 1});
   const updated = await expect('/settings', 200, 'PATCH', {timezone: 'America/Chicago', send_time: '09:30'});
   assert.equal(updated.send_time, '09:30');
@@ -237,7 +249,7 @@ test('production ignores the mock binding and spoofed identity on every admin ro
     ...['preview', 'commit'].map(action => ['/words/import/' + action, 'POST']),
     ['/recipients'], ['/recipients', 'POST'], ['/recipients/' + id, 'PATCH'],
     ...['preview', 'commit'].map(action => ['/recipients/import/' + action, 'POST']),
-    ['/email/preview'], ['/email/test'], ['/email/test', 'POST'], ['/history'], ['/settings'], ['/settings', 'PATCH'],
+    ['/email/preview'], ['/email/test'], ['/email/test', 'POST'], ['/history'], ['/settings'], ['/settings', 'PATCH'], ['/settings/schedule', 'PATCH'],
   ];
   for (const [path, method] of cases) {
     const result = await request(production, path, method, undefined, {'Cf-Access-Authenticated-User-Email': admin});
@@ -380,4 +392,99 @@ test('manual Graph test uses one allowlisted inbox, includes both formats, and d
   assert.equal(await db.prepare('SELECT status FROM recipients WHERE id=?').bind(testRecipient.id).first('status'), 'unsubscribed');
   assert.equal((await expect('/words/' + record.id, 200)).status, 'approved');
   assert.equal((await expect('/history', 200)).total, 0);
+});
+
+test('wall-clock due time follows Eastern daylight saving and crosses a spring-forward gap', () => {
+  const due = (timestamp, sendTime) => scheduleDue(Date.parse(timestamp), 'America/New_York', sendTime);
+  assert.equal(due('2026-01-02T18:00:00Z', '13:00'), true);
+  assert.equal(due('2026-07-02T17:00:00Z', '13:00'), true);
+  assert.equal(due('2026-07-02T16:59:00Z', '13:00'), false);
+  assert.equal(due('2026-07-02T17:16:00Z', '13:00'), false);
+  assert.equal(due('2026-03-08T06:59:00Z', '02:30'), false);
+  assert.equal(due('2026-03-08T07:00:00Z', '02:30'), true);
+  assert.equal(due('2026-03-08T07:14:00Z', '02:30'), true);
+  assert.equal(due('2026-03-08T07:15:00Z', '02:30'), false);
+});
+
+async function tick(timestamp) {
+  const params = new URLSearchParams({time:String(Date.parse(timestamp))});
+  const response = await local.dispatchFetch(origin+'/__test/scheduled?'+params);
+  const result = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(result));
+  assert.equal(result.outcome, 'ok', JSON.stringify(result));
+}
+
+test('daily Cron uses one run, checks opt-out, respects pause, and never retries an uncertain send', async () => {
+  const before = graphSubmissions.length;
+  const clearTime = () => expect('/settings', 200, 'PATCH', {timezone: 'America/New_York', send_time: '01:30'});
+  await clearTime();
+  const firstOccurrence = '2026-11-01T05:30:00Z';
+  const secondOccurrence = '2026-11-01T06:30:00Z';
+  await tick(firstOccurrence);
+  assert.equal(graphSubmissions.length, before);
+  const chosen = await expect('/words', 201, 'POST', word('Daily selector'));
+  await expect('/words/'+chosen.id+'/approve', 200, 'POST');
+  await expect('/words/'+chosen.id, 200, 'PATCH', {queue_priority: 10000});
+  const active = await expect('/recipients', 201, 'POST', recipient('daily@example.test'));
+  const optOut = await expect('/recipients', 201, 'POST', recipient('daily-opt-out@example.test'));
+  await expect('/recipients/'+optOut.id, 200, 'PATCH', {status:'unsubscribed'});
+  const enabled = await expect('/settings/schedule', 200, 'PATCH', {enabled:true});
+  assert.equal(enabled.sending_enabled, 1);
+  await tick('2026-11-01T05:29:00Z');
+  assert.equal(graphSubmissions.length, before);
+  graphStatus = 503;
+  await Promise.all([tick(firstOccurrence), tick(firstOccurrence)]);
+  assert.ok(graphSubmissions.length > before);
+  const dailyMessages = graphSubmissions.slice(before);
+  assert.equal(dailyMessages.filter(m => m.includes('To: <daily@example.test>')).length, 1);
+  assert.equal(dailyMessages.filter(m => m.includes('To: <daily-opt-out@example.test>')).length, 0);
+  await tick(secondOccurrence);
+  assert.equal(graphSubmissions.length, before + dailyMessages.length);
+  const history = (await expect('/history', 200)).rows[0];
+  assert.equal(history.schedule_date_et, '2026-11-01');
+  assert.equal(history.term, chosen.term);
+  assert.equal(history.status, 'failed');
+  assert.equal(history.unknown, dailyMessages.length);
+  assert.equal((await expect('/words/'+chosen.id, 200)).status, 'sent');
+  assert.equal(await db.prepare('SELECT status FROM recipients WHERE id=?').bind(active.id).first('status'), 'active');
+  const paused = await expect('/settings/schedule', 200, 'PATCH', {enabled:false});
+  assert.equal(paused.sending_enabled, 0);
+  await tick('2026-11-02T06:30:00Z');
+  assert.equal(graphSubmissions.length, before + dailyMessages.length);
+  assert.equal((await expect('/history', 200)).total, 1);
+});
+
+test('pause preserves a same-day backlog and resumed delivery excludes a newly unsubscribed recipient', async () => {
+  const before = graphSubmissions.length;
+  graphStatus = 202;
+  const selected = await expect('/words', 201, 'POST', word('Scheduled batch'));
+  await expect('/words/'+selected.id+'/approve', 200, 'POST');
+  await expect('/words/'+selected.id, 200, 'PATCH', {queue_priority: 10000});
+  for (let i = 0; i < 7; i++) await expect('/recipients', 201, 'POST', recipient(`batch-${i}@example.test`));
+  await expect('/settings', 200, 'PATCH', {timezone: 'America/New_York', send_time: '13:00'});
+  await expect('/settings/schedule', 200, 'PATCH', {enabled:true});
+
+  await tick('2026-11-02T18:00:00Z');
+  assert.equal(graphSubmissions.length, before + 5);
+  const run = (await expect('/history', 200)).rows[0];
+  assert.equal(run.status, 'running');
+  assert.equal(run.submitted, 5);
+  const pending = await db.prepare(`SELECT r.id,r.email_normalized AS email FROM send_deliveries d
+    JOIN recipients r ON r.id=d.recipient_id WHERE d.run_id=? AND d.status='pending' LIMIT 1`).bind(run.id).first();
+  await expect('/settings/schedule', 200, 'PATCH', {enabled:false});
+  await expect('/recipients/'+pending.id, 200, 'PATCH', {status:'unsubscribed'});
+  await tick('2026-11-02T18:01:00Z');
+  assert.equal(graphSubmissions.length, before + 5);
+  await expect('/settings/schedule', 200, 'PATCH', {enabled:true});
+  await tick('2026-11-02T18:02:00Z');
+
+  const messages = graphSubmissions.slice(before);
+  assert.ok(messages.length > 5);
+  assert.equal(new Set(messages.map(message => message.match(/^To: (.+)$/m)[1])).size, messages.length);
+  assert.ok(messages.every(message => !message.includes('To: <'+pending.email+'>')));
+  const complete = (await expect('/history', 200)).rows[0];
+  assert.equal(complete.status, 'completed');
+  assert.equal(complete.submitted, messages.length);
+  assert.equal(complete.suppressed, 1);
+  assert.equal((await expect('/words/'+selected.id, 200)).status, 'sent');
 });

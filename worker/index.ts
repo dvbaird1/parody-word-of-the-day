@@ -8,6 +8,8 @@ import { audit, auditChange, insertRecipient, insertWord, queueOrder } from './d
 import { HttpError, json, readBody, validate } from './http';
 import { importRecords } from './imports';
 import { previewProvider } from './preview';
+import { graphSender } from './graph';
+import { runScheduledDelivery } from './schedule';
 import { emailTestStatus, sendEmailTest, type EmailTestBindings } from './email-test';
 
 type Env = AuthBindings & EmailTestBindings & { DB: D1Database };
@@ -186,25 +188,44 @@ async function handle(request: Request, env: Env) {
     const page = validate(pageQuery, searchParams.get('page') ?? 1);
     const [count, rows] = await db.batch([
       db.prepare('SELECT COUNT(*) AS total FROM send_runs'),
-      db.prepare(`SELECT r.id,r.schedule_date_et,w.term,r.status,r.created_at,r.completed_at
+      db.prepare(`SELECT r.id,r.schedule_date_et,w.term,r.status,r.created_at,r.completed_at,
+        (SELECT COUNT(*) FROM send_deliveries d WHERE d.run_id=r.id AND d.status='submitted_to_graph') AS submitted,
+        (SELECT COUNT(*) FROM send_deliveries d WHERE d.run_id=r.id AND d.status='failed') AS failed,
+        (SELECT COUNT(*) FROM send_deliveries d WHERE d.run_id=r.id AND d.status='unknown') AS unknown,
+        (SELECT COUNT(*) FROM send_deliveries d WHERE d.run_id=r.id AND d.status='suppressed') AS suppressed
         FROM send_runs r JOIN words w ON w.id=r.word_id ORDER BY r.schedule_date_et DESC LIMIT 20 OFFSET ?`).bind((page - 1) * 20),
     ]);
     return json({rows: rows.results as SendRun[], total: Number((count.results[0] as {total: number}).total), page, pageSize: 20} satisfies Page<SendRun>);
   }
-  if (pathname === '/api/settings') {
-    if (method === 'PATCH') {
+  if (pathname === '/api/settings' || pathname === '/api/settings/schedule') {
+    const senderConfigured = graphSender(env) && env.UNSUBSCRIBE_LINKS ? 1 : 0;
+    if (pathname === '/api/settings/schedule' && method === 'PATCH') {
+      const {enabled} = validate(z.strictObject({enabled: z.boolean()}), await body());
+      if (enabled && !senderConfigured) throw new HttpError(409, 'Configure the Graph sender before enabling scheduled delivery.');
+      await db.batch([
+        db.prepare('UPDATE app_settings SET sending_enabled=? WHERE id=1').bind(enabled ? 1 : 0),
+        audit(db, actor, enabled ? 'schedule.enable' : 'schedule.pause', null, now),
+      ]);
+    }
+    if (pathname === '/api/settings' && method === 'PATCH') {
       const value = validate(settingsInput, await body());
       await db.batch([
         db.prepare('UPDATE app_settings SET timezone=?,send_time=? WHERE id=1').bind(value.timezone, value.send_time),
         audit(db, actor, 'settings.update', null, now),
       ]);
     }
-    if (method === 'GET' || method === 'PATCH') return json(await db.prepare('SELECT timezone,send_time,sending_enabled,sender_configured FROM app_settings WHERE id=1').first<Settings>());
+    if ((pathname === '/api/settings' && method === 'GET') || method === 'PATCH') {
+      const settings = await db.prepare('SELECT timezone,send_time,sending_enabled FROM app_settings WHERE id=1').first<Settings>();
+      return json({...settings, sender_configured: senderConfigured});
+    }
   }
   throw new HttpError(404, 'API route not found.');
 }
 
 export default {
+  async scheduled(controller: ScheduledController, env: Env) {
+    await runScheduledDelivery(controller.scheduledTime, env);
+  },
   async fetch(request: Request, env: Env): Promise<Response> {
     try {
       return await handle(request, env);

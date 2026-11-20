@@ -4,6 +4,8 @@ import { History, Overview, Preview, Settings } from './Screens';
 import { Words } from './Words';
 import { Recipients } from './Recipients';
 import type { Theme } from '../shared/email-theme';
+import type { Settings as AppSettings } from '../shared/model';
+import { useResource } from './api';
 import './style.css';
 
 const sections = {
@@ -62,6 +64,7 @@ function useTheme() {
 function App() {
   const [section, setSection] = useState(currentSection);
   const {theme, toggleTheme} = useTheme();
+  const schedule = useResource<AppSettings>('/settings');
   useEffect(() => {
     const navigate = () => { setSection(currentSection()); window.scrollTo(0, 0); };
     window.addEventListener('hashchange', navigate);
@@ -83,13 +86,15 @@ function App() {
       <header className="topbar">
         <span>Admin dashboard</span>
         <div className="topbar-actions">
-          <span className="off"><span aria-hidden="true"/>Scheduled sending off</span>
+          {schedule.data && <span className={schedule.data.sending_enabled ? 'badge badge-active' : 'off'}>
+            Scheduled sending {schedule.data.sending_enabled ? 'on' : 'off'}
+          </span>}
           <button type="button" className="theme-switch" role="switch" aria-checked={theme === 'dark'} onClick={toggleTheme}>
             <span className="theme-track" aria-hidden="true"/> Dark mode
           </button>
         </div>
       </header>
-      <main id="main-content" tabIndex={-1}><Component key={section} theme={theme}/></main>
+      <main id="main-content" tabIndex={-1}><Component key={section} theme={theme} onScheduleChange={schedule.refresh}/></main>
     </div>
   </div>;
 }

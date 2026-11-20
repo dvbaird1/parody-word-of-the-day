@@ -115,6 +115,7 @@ main { max-width: 1460px; margin: 0 auto; padding: clamp(1rem, 4vw, 3.5rem); }
 .metric strong { color: var(--text); font: 2.3rem Georgia, serif; }
 .overview-grid, .review-grid, .preview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; align-items: start; }
 .preview-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.65fr); }
+.test-send { margin-top: 1rem; }
 .readiness, .next-word, .padded, .review { padding: clamp(1rem, 2.5vw, 1.55rem); }
 .progress-label { margin-top: 1.5rem; color: var(--muted); }
 .progress-label strong { color: var(--green); font: 2.65rem Georgia, serif; }

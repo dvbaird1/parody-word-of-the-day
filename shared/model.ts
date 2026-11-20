@@ -60,3 +60,9 @@ export type ImportReport = {
 export type Settings = z.output<typeof settingsInput> & {sending_enabled: 0; sender_configured: 0};
 export type SendRun = {id: string; schedule_date_et: string; term: string; status: string; created_at: string; completed_at: string | null};
 export type EmailPreview = {subject: string; html: string; text: string};
+
+export type EmailTest = {
+  recipient: string | null;
+  configured: boolean;
+  status: 'pending' | 'submitted_to_graph' | 'failed' | 'unknown' | null;
+};

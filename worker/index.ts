@@ -8,8 +8,9 @@ import { audit, auditChange, insertRecipient, insertWord, queueOrder } from './d
 import { HttpError, json, readBody, validate } from './http';
 import { importRecords } from './imports';
 import { previewProvider } from './preview';
+import { emailTestStatus, sendEmailTest, type EmailTestBindings } from './email-test';
 
-type Env = AuthBindings & { DB: D1Database };
+type Env = AuthBindings & EmailTestBindings & { DB: D1Database };
 const idPattern = z.uuid();
 const pageQuery = z.coerce.number().int().min(1).max(100000);
 const transitions = {
@@ -168,6 +169,13 @@ async function handle(request: Request, env: Env) {
       AND (?<>'active' OR (consent_source IS NOT NULL AND consented_at IS NOT NULL))`)
       .bind(status, status, now, now, id, status, status), actor, `recipient.${status}`, id, now);
     return json(await getRecipient(db, id));
+  }
+  if (pathname === '/api/email/test') {
+    if (method === 'GET') return json(await emailTestStatus(db, env));
+    if (method === 'POST') {
+      const {wordId} = validate(z.strictObject({wordId: idPattern}), await body());
+      return json(await sendEmailTest(db, env, await getWord(db, wordId), actor));
+    }
   }
   if (pathname === '/api/email/preview' && method === 'GET') {
     const id = validate(idPattern, searchParams.get('wordId'));

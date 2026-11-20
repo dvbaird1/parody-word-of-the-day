@@ -5,6 +5,7 @@
   "compatibility_date": "2026-04-01",
   "workers_dev": false,
   "preview_urls": false,
+  "vars": {"UNSUBSCRIBE_ORIGIN": "https://unsubscribe.dvb3.org"},
   "observability": {"enabled": false},
   "d1_databases": [{
     "binding": "DB",

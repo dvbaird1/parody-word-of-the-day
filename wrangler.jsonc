@@ -8,12 +8,21 @@
   "vars": {
     "ACCESS_ISSUER": "https://db3it.cloudflareaccess.com",
     "ACCESS_AUDIENCE": "bbbcc921f3596d64f3ad41415055491de81ad28f53dbd214040e885c279a9a1e",
-    "ADMIN_EMAILS": "dbaird@db3it.com"
+    "ADMIN_EMAILS": "dbaird@db3it.com",
+    "GRAPH_TENANT_ID": "414970d3-7f91-424b-9693-1e2c5d28fa4b",
+    "GRAPH_CLIENT_ID": "1cf2ccf3-cf09-49fa-8e7e-f38d0d278b10",
+    "GRAPH_MAILBOX": "wordoftheday@db3it.com",
+    "GRAPH_TEST_RECIPIENT": "dbaird@dvb3.org"
   },
   "assets": {
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api", "/api/*"]
   },
+  "services": [{
+    "binding": "UNSUBSCRIBE_LINKS",
+    "service": "parody-word-unsubscribe",
+    "entrypoint": "UnsubscribeLinks"
+  }],
   "d1_databases": [{
     "binding": "DB",
     "database_name": "parody-word-of-the-day",

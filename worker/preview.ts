@@ -2,19 +2,23 @@ import { emailDarkStyles } from '../shared/email-theme';
 import type { EmailPreview, Word } from '../shared/model';
 
 export interface EmailProvider {
-  preview(word: Word, subject?: string): EmailPreview;
+  preview(word: Word, subject?: string, unsubscribe?: URL): EmailPreview;
 }
 
 const entities: Record<string, string> = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'};
 export const escapeHtml = (value: string) => value.replace(/[&<>"']/g, char => entities[char]);
 export const previewProvider: EmailProvider = {
-  preview(word, subject = `Word of the Day · ${word.term}`) {
+  preview(word, subject = `Word of the Day · ${word.term}`, unsubscribe) {
     subject = subject.replace(/[\r\n]+/g, ' ');
     const details = [word.part_of_speech, word.pronunciation].filter(Boolean).join(' · ');
     const footer = 'A personal unsubscribe link will appear in the delivered email.';
+    const unsubscribeText = unsubscribe ? `Unsubscribe: ${unsubscribe.href}` : footer;
+    const unsubscribeHtml = unsubscribe
+      ? `<a class="email-footer" style="color:inherit" href="${escapeHtml(unsubscribe.href)}">Unsubscribe</a>`
+      : footer;
     return {
       subject,
-      text: ['PARODY WORD OF THE DAY', word.term, details, `Real meaning: ${word.real_definition}`, `Deliberately wrong: “${word.parody_sentence}”`, footer].filter(Boolean).join('\n\n'),
+      text: ['PARODY WORD OF THE DAY', word.term, details, `Real meaning: ${word.real_definition}`, `Deliberately wrong: “${word.parody_sentence}”`, unsubscribeText].filter(Boolean).join('\n\n'),
       html: `<!doctype html>
 <html lang="en">
 <head>
@@ -50,7 +54,7 @@ export const previewProvider: EmailProvider = {
           <blockquote class="email-example" style="margin:22px 0;padding:16px;background-color:#eef0e5;color:#23251e;font:22px Georgia">
             <strong style="display:block;font:bold 13px Arial;margin-bottom:8px">DELIBERATELY WRONG</strong>“${escapeHtml(word.parody_sentence)}”
           </blockquote>
-          <p class="email-footer" style="font-size:13px;color:#54574b">${footer}</p>
+          <p class="email-footer" style="font-size:13px;color:#54574b">${unsubscribeHtml}</p>
         </td></tr>
       </table>
     </td></tr>

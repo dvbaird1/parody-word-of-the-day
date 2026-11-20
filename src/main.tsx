@@ -83,7 +83,7 @@ function App() {
       <header className="topbar">
         <span>Admin dashboard</span>
         <div className="topbar-actions">
-          <span className="off"><span aria-hidden="true"/>Sending OFF — Phase 1</span>
+          <span className="off"><span aria-hidden="true"/>Scheduled sending off</span>
           <button type="button" className="theme-switch" role="switch" aria-checked={theme === 'dark'} onClick={toggleTheme}>
             <span className="theme-track" aria-hidden="true"/> Dark mode
           </button>

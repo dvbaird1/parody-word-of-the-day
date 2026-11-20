@@ -1,7 +1,14 @@
+import { WorkerEntrypoint } from 'cloudflare:workers';
 import { auditChange } from '../data';
-import { verifyUnsubscribeToken } from './token';
+import { createUnsubscribeUrl, verifyUnsubscribeToken } from './token';
 
-type Env = {DB: D1Database; UNSUBSCRIBE_SIGNING_KEY?: string};
+type Env = {DB: D1Database; UNSUBSCRIBE_SIGNING_KEY: string; UNSUBSCRIBE_ORIGIN: string};
+
+export class UnsubscribeLinks extends WorkerEntrypoint<Env> {
+  async createLink(id: string): Promise<string> {
+    return (await createUnsubscribeUrl(this.env.UNSUBSCRIBE_ORIGIN, id, this.env.UNSUBSCRIBE_SIGNING_KEY)).href;
+  }
+}
 
 function page(title: string, message: string, status = 200, form = '', extraHeaders?: HeadersInit) {
   const headers = new Headers(extraHeaders);

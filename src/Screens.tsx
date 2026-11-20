@@ -1,6 +1,6 @@
 import { emailWithPreviewTheme, type Theme } from '../shared/email-theme';
 import { useState, type FormEvent } from 'react';
-import type { Dashboard, EmailPreview, Page, SendRun, Settings as AppSettings, Word } from '../shared/model';
+import type { Dashboard, EmailPreview, EmailTest, Page, SendRun, Settings as AppSettings, Word } from '../shared/model';
 import { send, useAction, useResource } from './api';
 import { Badge, Empty, formatDate, Notice, Pager, Result } from './components';
 
@@ -43,6 +43,23 @@ export function Preview({theme}: {theme: Theme}) {
   const [mode, setMode] = useState<'html' | 'text'>('html');
   const list = useResource<Page<Word>>('/words?' + new URLSearchParams({page: String(page), pageSize: '10', search: query}));
   const preview = useResource<EmailPreview>(request);
+  const test = useResource<EmailTest>('/email/test');
+  const testAction = useAction();
+  const testStatus = test.data?.status;
+  const canSendTest = test.data?.configured && word?.status === 'approved' &&
+    (testStatus === null || testStatus === 'failed');
+
+  function sendTest() {
+    if (!canSendTest || !word || !test.data?.recipient) return;
+    if (!window.confirm(`Send one test email for “${word.term}” to ${test.data.recipient}?`)) return;
+    void testAction.run(async () => {
+      try {
+        await send<EmailTest>('/email/test', 'POST', {wordId: word.id});
+      } finally {
+        test.refresh();
+      }
+    });
+  }
   function render(event: FormEvent) {
     event.preventDefault();
     if (!word) return;
@@ -51,7 +68,7 @@ export function Preview({theme}: {theme: Theme}) {
     else setRequest(path);
   }
   return <>
-    <div className="screen-head"><div><h1>Email preview</h1><p>Review the layout and plain-text version of a selected word.</p></div><Badge status="preview only"/></div>
+    <div className="screen-head"><div><h1>Email preview</h1><p>Review the layout and plain-text version of a selected word.</p></div></div>
     <div className="preview-grid">
       <form className="panel padded" onSubmit={render}>
         <h2>Compose preview</h2>
@@ -77,6 +94,22 @@ export function Preview({theme}: {theme: Theme}) {
         </> : !request && <Empty title="No email rendered">Choose a word and render a preview.</Empty>}
       </section>
     </div>
+    <section className="panel padded test-send" aria-label="Graph test send">
+      <h2>Send a test email</h2>
+      <Result {...test} retry={test.refresh}/>
+      <Notice notice={testAction.notice}/>
+      {test.data && <>
+        <p>Test inbox <strong>{test.data.recipient ?? 'Unconfigured'}</strong></p>
+        {!test.data.configured && <p>Configure the Graph credential to enable the test.</p>}
+        {test.data.configured && !testStatus && <p>Select an approved word to send a single test.</p>}
+        {testStatus === 'submitted_to_graph' && <p role="status">Microsoft Graph accepted the test. Check the inbox.</p>}
+        {testStatus === 'failed' && <p role="status">The test was rejected or stopped before submission. Check configuration before retrying.</p>}
+        {(testStatus === 'pending' || testStatus === 'unknown') && <p role="status">The test outcome is pending or uncertain. Verify the inbox before taking further action.</p>}
+        <button type="button" className="primary" disabled={!canSendTest || testAction.busy} onClick={sendTest}>
+          {testAction.busy ? 'Sending test…' : 'Send one test'}
+        </button>
+      </>}
+    </section>
   </>;
 }
 
@@ -90,7 +123,7 @@ export function History() {
       <table><thead><tr><th>Schedule date</th><th>Word</th><th>Run status</th><th>Completed</th></tr></thead>
         <tbody>{result.data.rows.map(run => <tr key={run.id}><td>{run.schedule_date_et}</td><td>{run.term}</td><td><Badge status={run.status}/></td><td>{formatDate(run.completed_at)}</td></tr>)}</tbody>
       </table><Pager result={result.data} setPage={setPage}/>
-    </> : <Empty title="No send runs">Email delivery is off in Phase 1.</Empty>}</div>}
+    </> : <Empty title="No send runs">No scheduled emails have been submitted.</Empty>}</div>}
   </>;
 }
 
@@ -117,7 +150,7 @@ export function Settings() {
     {result.data && <div className="overview-grid">
       <SettingsForm settings={result.data}/>
       <section className="panel padded"><h2>Email delivery</h2>
-        <dl className="details"><dt>Sending</dt><dd>OFF — Phase 1</dd><dt>Sender address</dt><dd>Not configured</dd><dt>Automated scheduling</dt><dd>Off</dd></dl>
+        <dl className="details"><dt>Scheduled sending</dt><dd>Off</dd><dt>Sender address</dt><dd>Not configured</dd><dt>Automated scheduling</dt><dd>Off</dd></dl>
       </section>
     </div>}
   </>;

@@ -12,7 +12,7 @@ The admin-only action in **Email preview → Send a test email** submits one tes
 
 ## Run the approved test
 
-In the dashboard, select an approved word in **Email preview**, enter the **Test recipient email**, then click **Send test email** and confirm the destination. Check the subject and sender in the inbox, both email formats, the HTML in light and dark mode, and the unsubscribe flow. If the test inbox had no recipient record, the dashboard creates an inactive one so its unsubscribe link can be verified. An existing opt-out or suppression blocks the send.
+In the dashboard, select an approved word in **Email preview**, enter a **Test recipient email** or use **Choose from recipients**, then click **Send test email** and confirm the destination. Check the subject and sender in the inbox, both email formats, the HTML in light and dark mode, and the unsubscribe flow. If the test inbox had no recipient record, the dashboard creates an inactive one so its unsubscribe link can be verified. An existing opt-out or suppression blocks the send.
 
 `submitted_to_graph` means Graph returned HTTP 202. Use the inbox to verify delivery. After acceptance or a definite failure, you can confirm another test to exercise inbox rules. Replaying the same request returns the original result. A pending or uncertain result blocks a new test to the same address to avoid a duplicate. Check the inbox and establish what happened before resetting a pending test record. The test does not mark its word as sent.
 

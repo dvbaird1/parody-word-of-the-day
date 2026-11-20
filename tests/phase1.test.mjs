@@ -375,8 +375,11 @@ test('manual Graph tests use the entered inbox, allow deliberate repeats, and de
   assert.equal((await expect('/email/test', 200, 'POST', confirmed)).status, 'submitted_to_graph');
   assert.equal(graphSubmissions.length, 2);
 
-  assert.equal((await expect('/email/test', 200, 'POST', testRequest('another-inbox@example.test'))).status, 'submitted_to_graph');
+  const existing = await expect('/recipients', 201, 'POST', recipient('another-inbox@example.test'));
+  assert.equal((await expect('/email/test', 200, 'POST', testRequest(existing.email))).status, 'submitted_to_graph');
   assert.ok(graphSubmissions.at(-1).includes('To: <another-inbox@example.test>'));
+  const preserved = (await expect('/recipients?search=another-inbox', 200)).rows;
+  assert.deepEqual(preserved, [existing]);
   assert.equal((await expect('/email/test', 200, 'POST', testRequest(testInbox))).status, 'submitted_to_graph');
   assert.equal((await expect('/email/test', 200, 'POST', confirmed)).status, 'submitted_to_graph');
   assert.equal(graphSubmissions.length, 4);

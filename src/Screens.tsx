@@ -1,8 +1,8 @@
 import { emailWithPreviewTheme, type Theme } from '../shared/email-theme';
 import { useState, type FormEvent } from 'react';
-import type { Dashboard, EmailPreview, EmailTest, Page, SendRun, Settings as AppSettings, Word } from '../shared/model';
+import type { Dashboard, EmailPreview, EmailTest, Page, Recipient, SendRun, Settings as AppSettings, Word } from '../shared/model';
 import { send, useAction, useResource } from './api';
-import { Badge, Empty, formatDate, Notice, Pager, Result } from './components';
+import { Badge, Dialog, Empty, formatDate, Notice, Pager, Result } from './components';
 
 export function Overview() {
   const result = useResource<Dashboard>('/dashboard');
@@ -34,6 +34,34 @@ export function Overview() {
   </>;
 }
 
+function TestRecipientPicker({close, select}: {close: () => void; select: (email: string) => void}) {
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const params = new URLSearchParams({page: String(page), pageSize: '10', search});
+  const result = useResource<Page<Recipient>>('/recipients?' + params);
+
+  return <Dialog title="Choose a recipient" close={close}>
+    <label>Search recipient email
+      <input type="search" value={search} maxLength={100} onChange={event => {
+        setSearch(event.target.value);
+        setPage(1);
+      }}/>
+    </label>
+    <Result {...result} retry={result.refresh}/>
+    {result.data && <>
+      {result.data.rows.length ? <ul className="test-recipient-list">
+        {result.data.rows.map(recipient => <li key={recipient.id}>
+          <button type="button" disabled={Boolean(recipient.unsubscribed_at) ||
+            (recipient.status !== 'active' && recipient.status !== 'inactive')}
+            onClick={() => select(recipient.email)}>{recipient.email}</button>
+          <Badge status={recipient.status}/>
+        </li>)}
+      </ul> : <p>No matching recipients.</p>}
+      {result.data.total > result.data.pageSize && <Pager result={result.data} setPage={setPage}/>}
+    </>}
+  </Dialog>;
+}
+
 export function Preview({theme}: {theme: Theme}) {
   const [word, setWord] = useState<Word>();
   const [query, setQuery] = useState('');
@@ -46,6 +74,7 @@ export function Preview({theme}: {theme: Theme}) {
   const test = useResource<{configured: boolean}>('/email/test');
   const testAction = useAction();
   const [testAddress, setTestAddress] = useState('');
+  const [choosingRecipient, setChoosingRecipient] = useState(false);
   const [testResult, setTestResult] = useState<EmailTest>();
   const [attempt, setAttempt] = useState<{id: string; recipient: string; wordId: string}>();
   const address = testAddress.trim().toLowerCase();
@@ -111,6 +140,7 @@ export function Preview({theme}: {theme: Theme}) {
           <input type="email" autoComplete="email" maxLength={254} required value={testAddress}
             disabled={testAction.busy} onChange={event => setTestAddress(event.target.value)}/>
         </label>
+        <button type="button" disabled={testAction.busy} onClick={() => setChoosingRecipient(true)}>Choose from recipients</button>
         {!test.data.configured && <p>Configure the Graph credential to enable the test.</p>}
         {test.data.configured && word?.status !== 'approved' && <p>Select an approved word to send a test.</p>}
         {testStatus === 'submitted_to_graph' && <p role="status">Microsoft Graph accepted the test. Check the inbox.</p>}
@@ -122,6 +152,10 @@ export function Preview({theme}: {theme: Theme}) {
         </button>
       </>}
     </form>
+    {choosingRecipient && <TestRecipientPicker close={() => setChoosingRecipient(false)} select={email => {
+      setTestAddress(email);
+      setChoosingRecipient(false);
+    }}/>}
   </>;
 }
 

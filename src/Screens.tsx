@@ -43,21 +43,29 @@ export function Preview({theme}: {theme: Theme}) {
   const [mode, setMode] = useState<'html' | 'text'>('html');
   const list = useResource<Page<Word>>('/words?' + new URLSearchParams({page: String(page), pageSize: '10', search: query}));
   const preview = useResource<EmailPreview>(request);
-  const test = useResource<EmailTest>('/email/test');
+  const test = useResource<{configured: boolean}>('/email/test');
   const testAction = useAction();
-  const testStatus = test.data?.status;
-  const canSendTest = test.data?.configured && word?.status === 'approved' &&
-    (testStatus === null || testStatus === 'failed');
+  const [testAddress, setTestAddress] = useState('');
+  const [testResult, setTestResult] = useState<EmailTest>();
+  const [attempt, setAttempt] = useState<{id: string; recipient: string; wordId: string}>();
+  const address = testAddress.trim().toLowerCase();
+  const testStatus = testResult?.recipient === address ? testResult.status : undefined;
+  const retry = attempt?.recipient === address && attempt.wordId === word?.id ? attempt : undefined;
+  const canSendTest = test.data?.configured && word?.status === 'approved' && address && testStatus !== 'unknown';
 
-  function sendTest() {
-    if (!canSendTest || !word || !test.data?.recipient) return;
-    if (!window.confirm(`Send one test email for “${word.term}” to ${test.data.recipient}?`)) return;
+  function sendTest(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canSendTest || !word || testAction.busy) return;
+    if (!retry && !window.confirm(`Send a test email for “${word.term}” to ${address}?`)) return;
+    const current = retry ?? {id: crypto.randomUUID(), recipient: address, wordId: word.id};
+    setAttempt(current);
+    setTestResult(undefined);
     void testAction.run(async () => {
-      try {
-        await send<EmailTest>('/email/test', 'POST', {wordId: word.id});
-      } finally {
-        test.refresh();
-      }
+      const result = await send<EmailTest>('/email/test', 'POST', {
+        wordId: current.wordId, recipient: current.recipient, attemptId: current.id,
+      });
+      setTestResult(result);
+      if (result.status !== 'pending') setAttempt(undefined);
     });
   }
   function render(event: FormEvent) {
@@ -94,22 +102,26 @@ export function Preview({theme}: {theme: Theme}) {
         </> : !request && <Empty title="No email rendered">Choose a word and render a preview.</Empty>}
       </section>
     </div>
-    <section className="panel padded test-send" aria-label="Graph test send">
+    <form className="panel padded test-send" aria-label="Graph test send" onSubmit={sendTest}>
       <h2>Send a test email</h2>
       <Result {...test} retry={test.refresh}/>
       <Notice notice={testAction.notice}/>
       {test.data && <>
-        <p>Test inbox <strong>{test.data.recipient ?? 'Unconfigured'}</strong></p>
+        <label>Test recipient email
+          <input type="email" autoComplete="email" maxLength={254} required value={testAddress}
+            disabled={testAction.busy} onChange={event => setTestAddress(event.target.value)}/>
+        </label>
         {!test.data.configured && <p>Configure the Graph credential to enable the test.</p>}
-        {test.data.configured && !testStatus && <p>Select an approved word to send a single test.</p>}
+        {test.data.configured && word?.status !== 'approved' && <p>Select an approved word to send a test.</p>}
         {testStatus === 'submitted_to_graph' && <p role="status">Microsoft Graph accepted the test. Check the inbox.</p>}
-        {testStatus === 'failed' && <p role="status">The test was rejected or stopped before submission. Check configuration before retrying.</p>}
-        {(testStatus === 'pending' || testStatus === 'unknown') && <p role="status">The test outcome is pending or uncertain. Verify the inbox before taking further action.</p>}
-        <button type="button" className="primary" disabled={!canSendTest || testAction.busy} onClick={sendTest}>
-          {testAction.busy ? 'Sending test…' : 'Send one test'}
+        {testStatus === 'failed' && <p role="status">The test was rejected or stopped before submission.</p>}
+        {testStatus === 'pending' && <p role="status">The previous test is still pending.</p>}
+        {testStatus === 'unknown' && <p role="status">The test outcome is uncertain. Check the inbox before taking further action.</p>}
+        <button type="submit" className="primary" disabled={!canSendTest || testAction.busy}>
+          {testAction.busy ? 'Sending test…' : testStatus === 'pending' ? 'Check test status' : retry ? 'Retry test' : 'Send test email'}
         </button>
       </>}
-    </section>
+    </form>
   </>;
 }
 

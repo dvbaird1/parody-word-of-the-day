@@ -62,7 +62,6 @@ export type SendRun = {id: string; schedule_date_et: string; term: string; statu
 export type EmailPreview = {subject: string; html: string; text: string};
 
 export type EmailTest = {
-  recipient: string | null;
-  configured: boolean;
-  status: 'pending' | 'submitted_to_graph' | 'failed' | 'unknown' | null;
+  recipient: string;
+  status: 'pending' | 'submitted_to_graph' | 'failed' | 'unknown';
 };

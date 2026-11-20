@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import {
-  normalizeTerm, recipientInput, recipientPatch, recipientStatus, settingsInput, wordInput, wordPatch, wordStatus,
+  normalizeEmail, normalizeTerm, recipientInput, recipientPatch, recipientStatus, settingsInput, wordInput, wordPatch, wordStatus,
   type Dashboard, type Page, type Recipient, type SendRun, type Settings, type Word,
 } from '../shared/model';
 import { authenticate, type AuthBindings } from './auth';
@@ -8,11 +8,11 @@ import { audit, auditChange, insertRecipient, insertWord, queueOrder } from './d
 import { HttpError, json, readBody, validate } from './http';
 import { importRecords } from './imports';
 import { previewProvider } from './preview';
-import { graphSender } from './graph';
+import { graphSender, type GraphBindings } from './graph';
 import { runScheduledDelivery } from './schedule';
-import { emailTestStatus, sendEmailTest, type EmailTestBindings } from './email-test';
+import { emailTestConfigured, sendEmailTest } from './email-test';
 
-type Env = AuthBindings & EmailTestBindings & { DB: D1Database };
+type Env = AuthBindings & GraphBindings & { DB: D1Database };
 const idPattern = z.uuid();
 const pageQuery = z.coerce.number().int().min(1).max(100000);
 const transitions = {
@@ -173,10 +173,12 @@ async function handle(request: Request, env: Env) {
     return json(await getRecipient(db, id));
   }
   if (pathname === '/api/email/test') {
-    if (method === 'GET') return json(await emailTestStatus(db, env));
+    if (method === 'GET') return json({configured: emailTestConfigured(env)});
     if (method === 'POST') {
-      const {wordId} = validate(z.strictObject({wordId: idPattern}), await body());
-      return json(await sendEmailTest(db, env, await getWord(db, wordId), actor));
+      const {wordId, recipient, attemptId} = validate(z.strictObject({
+        wordId: idPattern, recipient: z.string().trim().max(254).pipe(z.email()), attemptId: idPattern,
+      }), await body());
+      return json(await sendEmailTest(db, env, await getWord(db, wordId), actor, normalizeEmail(recipient), attemptId));
     }
   }
   if (pathname === '/api/email/preview' && method === 'GET') {

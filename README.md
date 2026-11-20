@@ -1,6 +1,6 @@
 # Parody Word of the Day
 
-A private admin dashboard for a vocabulary email that pairs a real definition with a deliberately wrong example sentence. Phase 1 covers manual authoring, approval, queue planning, recipient consent, and preview. Scheduled email delivery starts paused. Paid AI is off. A separately configured manual send can test Microsoft Graph with a single approved inbox.
+A private admin dashboard for a vocabulary email that pairs a real definition with a deliberately wrong example sentence. Phase 1 covers manual authoring, approval, queue planning, recipient consent, and preview. Scheduled email delivery starts paused. Paid AI is off. A separately configured manual send can test Microsoft Graph with one entered address per confirmation.
 
 ## Run locally
 

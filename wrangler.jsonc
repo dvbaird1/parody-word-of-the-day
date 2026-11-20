@@ -13,8 +13,7 @@
     "ADMIN_EMAILS": "dbaird@db3it.com",
     "GRAPH_TENANT_ID": "414970d3-7f91-424b-9693-1e2c5d28fa4b",
     "GRAPH_CLIENT_ID": "1cf2ccf3-cf09-49fa-8e7e-f38d0d278b10",
-    "GRAPH_MAILBOX": "wordoftheday@db3it.com",
-    "GRAPH_TEST_RECIPIENT": "dbaird@dvb3.org"
+    "GRAPH_MAILBOX": "wordoftheday@db3it.com"
   },
   "assets": {
     "not_found_handling": "single-page-application",

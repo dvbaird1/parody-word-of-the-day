@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -28,7 +28,6 @@ const graphBindings = {
   GRAPH_CLIENT_ID: '00000000-0000-4000-8000-000000000002',
   GRAPH_CLIENT_SECRET: 'mock-test-credential',
   GRAPH_MAILBOX: 'wordoftheday@example.test',
-  GRAPH_TEST_RECIPIENT: testInbox,
 };
 const graphSubmissions = [];
 let graphStatus = 403;
@@ -105,7 +104,7 @@ before(async () => {
   production = new Miniflare(convertV4MiniflareOptions({cf: false, ...common, scriptPath: productionPath}));
   productionWorker = (await import(pathToFileURL(productionPath).href)).default;
   db = await local.getD1Database('DB');
-  for (const name of ['0001_initial.sql', '0002_email_test_sends.sql', '0003_scheduled_delivery.sql']) {
+  for (const name of ['0001_initial.sql', '0002_email_test_sends.sql', '0003_scheduled_delivery.sql', '0004_editable_test_recipient.sql']) {
     const migration = await readFile('migrations/' + name, 'utf8');
     await db.batch(migration.split(';').map(statement => statement.trim()).filter(Boolean).map(statement => db.prepare(statement)));
   }
@@ -355,24 +354,32 @@ test('a public unsubscribe link requires confirmation and stops future delivery 
     .bind(person.id).first('count'), 1);
 });
 
-test('manual Graph test uses one allowlisted inbox, includes both formats, and deduplicates submission', async () => {
-  assert.deepEqual(await expect('/email/test', 200), {recipient: testInbox, configured: true, status: null});
+test('manual Graph tests use the entered inbox, allow deliberate repeats, and deduplicate request retries', async () => {
+  assert.deepEqual(await expect('/email/test', 200), {configured: true});
   const record = await expect('/words', 201, 'POST', word('Coöperate'));
-  const payload = {wordId: record.id};
-  await expect('/email/test', 400, 'POST', {...payload, recipient: 'other@example.test'});
+  const testRequest = (recipient) => ({wordId: record.id, recipient, attemptId: randomUUID()});
+  const payload = testRequest('  TEST-INBOX@EXAMPLE.TEST  ');
+  await expect('/email/test', 400, 'POST', {...payload, recipient: 'invalid-email'});
   await expect('/email/test', 409, 'POST', payload);
   await expect('/words/' + record.id + '/approve', 200, 'POST');
   await expect('/email/test', 403, 'POST', payload, {Origin: 'https://elsewhere.example'});
   assert.equal(graphSubmissions.length, 0);
 
   const rejected = await expect('/email/test', 200, 'POST', payload);
-  assert.equal(rejected.status, 'failed');
+  assert.deepEqual(rejected, {recipient:testInbox, status:'failed'});
   graphStatus = 202;
-  const results = await Promise.all([request(local, '/email/test', 'POST', payload), request(local, '/email/test', 'POST', payload)]);
-  assert.deepEqual(results.map(result => result.status).sort(), [200, 409]);
-  assert.equal(results.find(result => result.status === 200).data.status, 'submitted_to_graph');
-  await expect('/email/test', 409, 'POST', payload);
+  const confirmed = testRequest(testInbox);
+  const results = await Promise.all([request(local, '/email/test', 'POST', confirmed), request(local, '/email/test', 'POST', confirmed)]);
+  assert.deepEqual(results.map(result => result.status), [200, 200]);
+  assert.ok(results.some(result => result.data.status === 'submitted_to_graph'));
+  assert.equal((await expect('/email/test', 200, 'POST', confirmed)).status, 'submitted_to_graph');
   assert.equal(graphSubmissions.length, 2);
+
+  assert.equal((await expect('/email/test', 200, 'POST', testRequest('another-inbox@example.test'))).status, 'submitted_to_graph');
+  assert.ok(graphSubmissions.at(-1).includes('To: <another-inbox@example.test>'));
+  assert.equal((await expect('/email/test', 200, 'POST', testRequest(testInbox))).status, 'submitted_to_graph');
+  assert.equal((await expect('/email/test', 200, 'POST', confirmed)).status, 'submitted_to_graph');
+  assert.equal(graphSubmissions.length, 4);
 
   const mime = graphSubmissions.at(-1);
   assert.ok(mime.includes('From: <wordoftheday@example.test>\r\nTo: <' + testInbox + '>'));
@@ -390,6 +397,15 @@ test('manual Graph test uses one allowlisted inbox, includes both formats, and d
   const unsubscribed = await local.dispatchFetch(link, {method: 'POST', headers: {Origin: unsubscribeOrigin}, redirect:'manual'});
   assert.equal(unsubscribed.status, 303);
   assert.equal(await db.prepare('SELECT status FROM recipients WHERE id=?').bind(testRecipient.id).first('status'), 'unsubscribed');
+  await expect('/email/test', 409, 'POST', testRequest(testInbox));
+  assert.equal(graphSubmissions.length, 4);
+
+  graphStatus = 503;
+  const uncertain = testRequest('uncertain-inbox@example.test');
+  assert.equal((await expect('/email/test', 200, 'POST', uncertain)).status, 'unknown');
+  await expect('/email/test', 409, 'POST', testRequest(uncertain.recipient));
+  assert.equal((await expect('/email/test', 200, 'POST', uncertain)).status, 'unknown');
+  assert.equal(graphSubmissions.length, 5);
   assert.equal((await expect('/words/' + record.id, 200)).status, 'approved');
   assert.equal((await expect('/history', 200)).total, 0);
 });
